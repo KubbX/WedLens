@@ -33,6 +33,29 @@
     --font-head:'Fredoka',sans-serif; --font-hand:'Caveat',cursive;
   }
   [data-theme="colorful"] .join{background:linear-gradient(135deg,#fde4f2,#e9e0ff 50%,#fff4d6)}
+  /* Festif & coloré : éclaboussures aquarelle dans les coins de l'écran */
+  [data-theme="colorful"] body:before{
+    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:
+      radial-gradient(circle at 0% 0%,rgba(124,58,237,.22),transparent 24%),
+      radial-gradient(circle at 100% 6%,rgba(16,185,129,.20),transparent 22%),
+      radial-gradient(circle at 4% 100%,rgba(224,33,138,.20),transparent 24%),
+      radial-gradient(circle at 100% 100%,rgba(255,140,0,.22),transparent 24%),
+      radial-gradient(circle at 100% 42%,rgba(255,179,0,.14),transparent 20%);
+  }
+  /* Titre arc-en-ciel + surligneur façon feutre */
+  [data-theme="colorful"] .nb-title{background:linear-gradient(95deg,#7c3aed,#e0218a 35%,#ff7a00 68%,#10b981);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent;font-weight:700}
+  [data-theme="colorful"] .nb-sub{display:inline-block;color:#7a5510;background:linear-gradient(transparent 52%,#ffd96b 52%);padding:0 10px 1px;border-radius:5px;transform:rotate(-1.2deg)}
+  /* Boutons, pastilles et bandeaux plus vifs */
+  [data-theme="colorful"] .cta,[data-theme="colorful"] .bigbtn.cam{background:linear-gradient(120deg,#e0218a,#ff6a00 55%,#ffb300);box-shadow:0 8px 22px rgba(224,33,138,.38)}
+  [data-theme="colorful"] .hscore{background:linear-gradient(120deg,#10b981,#0ea5a5)}
+  [data-theme="colorful"] .htimer{background:linear-gradient(120deg,#fde0ee,#ffe9c7);color:#c01277}
+  [data-theme="colorful"] nav button .badge{background:linear-gradient(120deg,#e0218a,#ff7a00)}
+  [data-theme="colorful"] .phasebanner{background:linear-gradient(120deg,#fde4f2,#e9e0ff 55%,#fff0d6);border:1px solid #f3cfe6;color:#6b4fae}
+  [data-theme="colorful"] .pts{box-shadow:0 2px 7px rgba(0,0,0,.13)}
+  [data-theme="colorful"] .check{border-color:#e7a9da}
+  [data-theme="colorful"] .lbrow{box-shadow:0 3px 12px rgba(124,58,237,.10)}
+  [data-theme="colorful"] .sectitle{color:#c01277}
   /* ===== THÈME : Champêtre ===== */
   [data-theme="champetre"]{
     --bg:#f3ecde; --surface:#fbf6ea; --ink:#3f3a2c; --muted:#8c8163;

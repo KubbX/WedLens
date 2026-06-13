@@ -566,13 +566,14 @@ function carnetHTML(){
   if(STATE.phase==='vote' && STATE.config.photosDuringVote) banner=`<div class="phasebanner">💞 Les votes sont ouverts — et vous pouvez continuer à ajouter des photos pour capturer tous les moments&nbsp;!</div>`;
   else if(STATE.phase==='vote') banner=`<div class="phasebanner">💞 Phase votes — la saisie des photos est terminée</div>`;
   else if(STATE.phase==='results') banner=`<div class="phasebanner">🏆 Résultats — le jeu est figé</div>`;
-  const rows=me.assigned.map(cid=>{
-    const c=ch(cid); if(!c)return''; const done=mySubs.find(s=>s.challengeId===cid);
+  const myChallenges=STATE.challenges.filter(c=>c.group===me.group);
+  const rows=myChallenges.map(c=>{
+    const cid=c.id; const done=mySubs.find(s=>s.challengeId===cid);
     const cls='task'+(done?' done':'')+(locked&&!done?' locked':'');
     return `<div class="${cls}"><div class="check">${done?'✓':''}</div>
       <div class="txt" ${(!done&&!locked)?`data-act="open" data-cid="${cid}"`:''}>${esc(c.text)}</div>
       <span class="pts p${c.points}">${c.points}</span></div>${done?`<div class="polaroid"><img src="${done.photo}"></div>`:''}`;
-  }).join('');
+  }).join('') || `<div class="nb-hint">Tes défis arrivent…</div>`;
   const hint = locked
     ? `<div class="nb-hint">Les photos sont closes ✦<br>Direction l’onglet 🏆 pour le classement</div>`
     : `<div class="nb-hint">Touchez un défi pour ajouter votre photo ✦<br>${STATE.phase==='vote'?'Pensez aussi à voter dans l’onglet 💞':'Le vote s’ouvrira plus tard dans l’onglet 💞'}</div>`;

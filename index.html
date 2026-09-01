@@ -769,6 +769,64 @@ async function downloadAllPhotos(btn){
 }
 
 /* =========================================================================
+   EXPORT DE SECOURS : lit directement le bucket "photos"
+   Récupère TOUT, y compris les photos dont le défi a été supprimé.
+   ========================================================================= */
+async function downloadFromStorage(btn){
+  if(!LIVE){toast('Disponible uniquement en ligne');return;}
+  if(typeof JSZip==='undefined'){toast('Module ZIP non chargé');return;}
+  const setLabel=txt=>{try{btn.textContent=txt;}catch(_){}};
+  try{
+    btn.disabled=true; setLabel('Lecture du stockage…');
+    /* 1. lister tous les fichiers (un dossier par invité) */
+    const roots=(await sb.storage.from('photos').list('',{limit:1000})).data||[];
+    const files=[];
+    for(const r of roots){
+      if(!r.name) continue;
+      const inner=(await sb.storage.from('photos').list(r.name,{limit:1000})).data||[];
+      inner.forEach(f=>{ if(f.name) files.push({guestId:r.name,name:f.name,path:`${r.name}/${f.name}`}); });
+    }
+    if(!files.length){toast('Aucun fichier dans le stockage');return;}
+    /* 2. regrouper par défi (l'id du défi est en tête du nom de fichier) */
+    const zip=new JSZip(), rootO=zip.folder('Photos originales'), rootP=zip.folder('Photos polaroid');
+    const groups=new Map();
+    files.forEach(f=>{ const cid=f.name.split('_')[0]; if(!groups.has(cid))groups.set(cid,[]); groups.get(cid).push(f); });
+    /* défis existants d'abord, puis les supprimés */
+    const known=[...groups.keys()].filter(k=>ch(k)), lost=[...groups.keys()].filter(k=>!ch(k));
+    const total=files.length; let done=0, failed=0, idx=0, nLost=0;
+    const handle=async(list,dir)=>{
+      const fO=rootO.folder(dir), fP=rootP.folder(dir); let n=0;
+      for(const f of list){
+        n++;
+        const g=STATE.guests.find(x=>x.id===f.guestId);
+        const author=g?g.name:'invite';
+        const cObj=ch(f.name.split('_')[0]);
+        const label=cObj?cObj.text:'Défi supprimé';
+        const base=`${String(n).padStart(2,'0')}_${sanitize(author)}`;
+        try{
+          const url=sb.storage.from('photos').getPublicUrl(f.path).data.publicUrl;
+          const blob=await (await fetch(url)).blob();
+          const ext=blob.type==='image/png'?'png':'jpg';
+          fO.file(`${base}.${ext}`,blob);
+          try{ const pol=await makePolaroid(url,author,label); if(pol) fP.file(`${base}_polaroid.jpg`,pol); }catch(_){}
+        }catch(_){failed++;}
+        done++; setLabel(`Récupération… ${done}/${total}`);
+      }
+    };
+    for(const cid of known){ idx++; await handle(groups.get(cid),`${String(idx).padStart(2,'0')} - ${sanitize(ch(cid).text)}`); }
+    for(const cid of lost){ nLost++; await handle(groups.get(cid),`Defis supprimes/${String(nLost).padStart(2,'0')} - defi-${cid.slice(0,8)}`); }
+    setLabel('Compression…');
+    const out=await zip.generateAsync({type:'blob',compression:'STORE'});
+    const url=URL.createObjectURL(out), a=document.createElement('a');
+    a.href=url; a.download=`recuperation-photos-${sanitize(STATE.config.coupleNames)}.zip`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),8000);
+    toast(`${done-failed} photo(s) récupérée(s)${failed?` — ${failed} échec(s)`:''} 📦`);
+  }catch(e){console.error(e);toast('Échec de la récupération');}
+  finally{try{btn.disabled=false;btn.textContent='🛟 Export de secours (tout le stockage)';}catch(_){}}
+}
+
+/* =========================================================================
    PURGE COMPLÈTE (après le mariage) — double confirmation obligatoire
    ========================================================================= */
 async function purgeEverything(btn){
@@ -904,6 +962,9 @@ function admModer(){
      <div class="note" style="margin:0 0 10px">Télécharge toutes les photos dans un .zip, avec pour chaque défi un dossier contenant deux versions : l’originale et une version polaroïd légendée (prénom + défi). Selon le nombre de photos, l’opération peut prendre un moment.</div>
      <button class="abtn gold" data-act="dlphotos" ${n?'':'disabled'}>📦 Télécharger toutes les photos (.zip)</button>
      ${n?'':'<div class="note">Aucune photo pour le moment.</div>'}</div>
+   <div class="acard"><h4>Export de secours</h4>
+     <div class="note" style="margin:0 0 10px">Lit directement le stockage et récupère <b>toutes</b> les photos, y compris celles dont le défi a été supprimé (rangées dans « Defis supprimes »). À utiliser si l’export normal en ramène moins que prévu.</div>
+     <button class="abtn ghost" data-act="dlstorage">🛟 Export de secours (tout le stockage)</button></div>
    <div class="acard"><h4>Après le mariage</h4>
      <div class="note" style="margin:0 0 10px">Efface définitivement participants, photos, votes <b>et les fichiers du stockage</b>. Les réglages (mariés, défis, thème, groupes, PIN) sont conservés pour un prochain événement. Fais ton export avant !</div>
      <button class="abtn danger" data-act="purge">🧹 Vider entièrement la base</button>
@@ -951,6 +1012,7 @@ document.addEventListener('click',async e=>{
   if(a==='delch'){ const id=t.dataset.id; if(LIVE){try{await sb.from('challenges').delete().eq('id',id);await pull('challenges');rerender();}catch(e){console.error(e);}} else {STATE.challenges=STATE.challenges.filter(c=>c.id!==id);renderAdmin();} return; }
   if(a==='delsub'){ const id=t.dataset.id; if(LIVE){try{await sb.from('submissions').delete().eq('id',id);await pull('submissions');await pull('votes');rerender();}catch(e){console.error(e);}} else {STATE.submissions=STATE.submissions.filter(s=>s.id!==id);STATE.votes=STATE.votes.filter(v=>sub(v.submissionId));renderAdmin();} return; }
   if(a==='dlphotos'){ downloadAllPhotos(t); return; }
+  if(a==='dlstorage'){ downloadFromStorage(t); return; }
   if(a==='purge'){
     const n=STATE.submissions.length, g=STATE.guests.length;
     if(!confirm(`⚠️ SUPPRESSION DÉFINITIVE\n\n${g} participant(s), ${n} photo(s) et tous les votes seront effacés, ainsi que les fichiers photos du stockage.\n\nPense à faire l’export .zip AVANT de continuer.\n\nContinuer ?`)) return;

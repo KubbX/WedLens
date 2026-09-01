@@ -827,6 +827,80 @@ async function downloadFromStorage(btn){
 }
 
 /* =========================================================================
+   RÉCUPÉRATION : regroupe les fichiers du stockage par défi réel
+   et permet de (re)nommer chaque groupe à la main avant l'export.
+   ========================================================================= */
+try{ STATE.recover=JSON.parse(safeGet('wedding_relabel')||'{}'); }catch(_){ STATE.recover={}; }
+STATE.scan=null;
+
+async function scanStorage(btn){
+  if(!LIVE){toast('Disponible uniquement en ligne');return;}
+  try{
+    if(btn){btn.disabled=true;btn.textContent='Analyse du stockage…';}
+    const roots=(await sb.storage.from('photos').list('',{limit:1000})).data||[];
+    const groups=new Map();
+    for(const r of roots){
+      if(!r.name) continue;
+      const inner=(await sb.storage.from('photos').list(r.name,{limit:1000})).data||[];
+      inner.forEach(f=>{
+        if(!f.name) return;
+        const cid=f.name.split('_')[0];
+        const ts=parseInt((f.name.split('_')[1]||'').split('.')[0])||0;
+        if(!groups.has(cid)) groups.set(cid,[]);
+        groups.get(cid).push({guestId:r.name,name:f.name,path:`${r.name}/${f.name}`,ts});
+      });
+    }
+    STATE.scan=[...groups.entries()].map(([cid,files])=>({cid,files:files.sort((a,b)=>a.ts-b.ts)}))
+      .sort((a,b)=>(a.files[0].ts||0)-(b.files[0].ts||0));
+    renderAdmin();
+  }catch(e){console.error(e);toast('Analyse impossible');}
+  finally{ if(btn){try{btn.disabled=false;btn.textContent='🔍 Analyser le stockage';}catch(_){}} }
+}
+function labelFor(cid){
+  if(STATE.recover[cid]) return STATE.recover[cid];
+  const c=ch(cid); return c?c.text:'';
+}
+function saveRelabel(){ safeSet('wedding_relabel',JSON.stringify(STATE.recover)); }
+
+async function exportScan(btn){
+  if(!STATE.scan||!STATE.scan.length){toast('Lance d’abord l’analyse');return;}
+  if(typeof JSZip==='undefined'){toast('Module ZIP non chargé');return;}
+  const setLabel=t=>{try{btn.textContent=t;}catch(_){}};
+  try{
+    btn.disabled=true;
+    const zip=new JSZip(), rootO=zip.folder('Photos originales'), rootP=zip.folder('Photos polaroid');
+    const total=STATE.scan.reduce((t,g)=>t+g.files.length,0); let done=0,failed=0,idx=0;
+    for(const g of STATE.scan){
+      idx++;
+      const lbl=labelFor(g.cid)||`defi-${g.cid.slice(0,8)}`;
+      const dir=`${String(idx).padStart(2,'0')} - ${sanitize(lbl)}`;
+      const fO=rootO.folder(dir), fP=rootP.folder(dir); let n=0;
+      for(const f of g.files){
+        n++;
+        const gu=STATE.guests.find(x=>x.id===f.guestId);
+        const author=gu?gu.name:'invite';
+        const base=`${String(n).padStart(2,'0')}_${sanitize(author)}`;
+        try{
+          const url=sb.storage.from('photos').getPublicUrl(f.path).data.publicUrl;
+          const blob=await (await fetch(url)).blob();
+          fO.file(`${base}.${blob.type==='image/png'?'png':'jpg'}`,blob);
+          try{ const pol=await makePolaroid(url,author,lbl); if(pol) fP.file(`${base}_polaroid.jpg`,pol); }catch(_){}
+        }catch(_){failed++;}
+        done++; setLabel(`Export… ${done}/${total}`);
+      }
+    }
+    setLabel('Compression…');
+    const out=await zip.generateAsync({type:'blob',compression:'STORE'});
+    const url=URL.createObjectURL(out), a=document.createElement('a');
+    a.href=url; a.download=`photos-completes-${sanitize(STATE.config.coupleNames)}.zip`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),8000);
+    toast(`${done-failed} photo(s) exportée(s) 📦`);
+  }catch(e){console.error(e);toast('Échec de l’export');}
+  finally{try{btn.disabled=false;btn.textContent='📦 Exporter avec ces intitulés';}catch(_){}}
+}
+
+/* =========================================================================
    PURGE COMPLÈTE (après le mariage) — double confirmation obligatoire
    ========================================================================= */
 async function purgeEverything(btn){
@@ -869,10 +943,33 @@ function renderAdmin(){
   const tab=STATE.adminTab;
   const tb=(id,lb)=>`<button class="${tab===id?'on':''}" data-act="atab" data-tab="${id}">${lb}</button>`;
   a.innerHTML=`<div class="atop"><h2>⚙️ Console organisateur</h2><button class="x" data-act="aclose">✕</button></div>
-    <div class="atabs">${tb('deroulement','Déroulement')}${tb('infos','Infos')}${tb('defis','Défis')}${tb('groupes','Groupes')}${tb('moder','Modération')}</div>
+    <div class="atabs">${tb('deroulement','Déroulement')}${tb('infos','Infos')}${tb('defis','Défis')}${tb('groupes','Groupes')}${tb('moder','Modération')}${tb('recup','Récupération')}</div>
     <div class="abody">${admBody(tab)}</div>`;
 }
-function admBody(tab){ if(tab==='infos')return admInfos(); if(tab==='defis')return admDefis(); if(tab==='groupes')return admGroupes(); if(tab==='moder')return admModer(); return admDeroulement(); }
+function admBody(tab){ if(tab==='infos')return admInfos(); if(tab==='defis')return admDefis(); if(tab==='groupes')return admGroupes(); if(tab==='moder')return admModer(); if(tab==='recup')return admRecup(); return admDeroulement(); }
+
+function admRecup(){
+  const head=`<div class="acard"><h4>Récupération des intitulés</h4>
+    <div class="note" style="margin:0 0 10px">Analyse le stockage et regroupe les photos par défi réel (celui utilisé au moment de la prise). Pour chaque groupe, regarde les vignettes et saisis le bon intitulé — puis exporte. Les intitulés saisis sont conservés sur cet appareil.</div>
+    <button class="abtn ghost" data-act="scan">🔍 Analyser le stockage</button></div>`;
+  if(!STATE.scan) return head;
+  if(!STATE.scan.length) return head+`<div class="acard"><div class="note">Aucun fichier trouvé.</div></div>`;
+  const total=STATE.scan.reduce((t,g)=>t+g.files.length,0);
+  const cards=STATE.scan.map((g,i)=>{
+    const thumbs=g.files.slice(0,4).map(f=>`<img src="${sb.storage.from('photos').getPublicUrl(f.path).data.publicUrl}" style="width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;display:block">`).join('');
+    const when=g.files[0].ts?new Date(g.files[0].ts).toLocaleString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
+    const known=!!ch(g.cid);
+    return `<div class="acard">
+      <h4>Groupe ${i+1} — ${g.files.length} photo${g.files.length>1?'s':''}</h4>
+      <div class="modgrid" style="grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px">${thumbs}</div>
+      <div class="afield" style="margin-bottom:6px"><label>Intitulé du défi</label>
+        <input data-relabel="${g.cid}" value="${esc(labelFor(g.cid))}" placeholder="Ex. Un toast immortalisé"></div>
+      <div class="note" style="margin-top:4px">1ʳᵉ photo : ${when} · ${known?'défi encore présent (vérifie qu’il correspond bien)':'défi supprimé — à renommer'}</div>
+    </div>`;
+  }).join('');
+  return head+`<div class="acard"><h4>${STATE.scan.length} défis · ${total} photos</h4>
+      <button class="abtn gold" data-act="exportscan">📦 Exporter avec ces intitulés</button></div>`+cards;
+}
 
 function admDeroulement(){
   const nf=STATE.guests.length, B=STATE.config.bonus;
@@ -1013,6 +1110,8 @@ document.addEventListener('click',async e=>{
   if(a==='delsub'){ const id=t.dataset.id; if(LIVE){try{await sb.from('submissions').delete().eq('id',id);await pull('submissions');await pull('votes');rerender();}catch(e){console.error(e);}} else {STATE.submissions=STATE.submissions.filter(s=>s.id!==id);STATE.votes=STATE.votes.filter(v=>sub(v.submissionId));renderAdmin();} return; }
   if(a==='dlphotos'){ downloadAllPhotos(t); return; }
   if(a==='dlstorage'){ downloadFromStorage(t); return; }
+  if(a==='scan'){ scanStorage(t); return; }
+  if(a==='exportscan'){ exportScan(t); return; }
   if(a==='purge'){
     const n=STATE.submissions.length, g=STATE.guests.length;
     if(!confirm(`⚠️ SUPPRESSION DÉFINITIVE\n\n${g} participant(s), ${n} photo(s) et tous les votes seront effacés, ainsi que les fichiers photos du stockage.\n\nPense à faire l’export .zip AVANT de continuer.\n\nContinuer ?`)) return;
@@ -1075,6 +1174,7 @@ document.addEventListener('change',async e=>{
 document.addEventListener('input',e=>{
   const t=e.target;
   if(t.dataset.field){STATE.config[t.dataset.field]=t.value;}
+  else if(t.dataset.relabel){STATE.recover[t.dataset.relabel]=t.value;saveRelabel();}
   else if(t.dataset.bidx){STATE.config.bonus[+t.dataset.bidx]=Math.max(0,parseInt(t.value)||0);}
   else if(t.dataset.cfield==='text'){const c=ch(t.dataset.id);if(c)c.text=t.value;}
 });

@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Fredoka:wght@500;600&family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
   :root{
     /* ===== THÈME (valeurs par défaut = thème "Romantique" actuel) ===== */
@@ -643,6 +644,110 @@ function closeOverlays(){['ovx','ovpin'].forEach(id=>{const e=document.getElemen
 function toast(msg){const t=document.createElement('div');t.className='toast';t.textContent=msg;document.body.appendChild(t);setTimeout(()=>t.remove(),2000);}
 
 /* =========================================================================
+   EXPORT : toutes les photos en .zip, un dossier par défi
+   ========================================================================= */
+function sanitize(s){return (s||'').replace(/[\/\\:*?"<>|\n\r\t]+/g,'-').replace(/\s+/g,' ').trim().slice(0,60)||'sans-nom';}
+
+/* fabrique une version "polaroïd" (cadre blanc + légende manuscrite) */
+function loadImg(src){return new Promise((res,rej)=>{const i=new Image();i.crossOrigin='anonymous';i.onload=()=>res(i);i.onerror=rej;i.src=src;});}
+function wrapText(ctx,text,maxW){
+  const words=(text||'').split(' '); const lines=[]; let cur='';
+  words.forEach(w=>{const t=cur?cur+' '+w:w; if(ctx.measureText(t).width>maxW&&cur){lines.push(cur);cur=w;} else cur=t;});
+  if(cur)lines.push(cur); return lines.slice(0,3);
+}
+async function makePolaroid(src,author,challenge){
+  const img=await loadImg(src);
+  const W=1000, pad=48, photo=W-pad*2, bottom=250;
+  const c=document.createElement('canvas'); c.width=W; c.height=pad+photo+bottom;
+  const x=c.getContext('2d');
+  x.fillStyle='#ffffff'; x.fillRect(0,0,c.width,c.height);
+  /* photo recadrée en carré, centrée */
+  const side=Math.min(img.width,img.height);
+  x.drawImage(img,(img.width-side)/2,(img.height-side)/2,side,side,pad,pad,photo,photo);
+  x.strokeStyle='rgba(0,0,0,.08)'; x.lineWidth=2; x.strokeRect(pad,pad,photo,photo);
+  /* légende */
+  const cx=W/2, top=pad+photo;
+  x.textAlign='center'; x.fillStyle='#2f2a22';
+  x.font='600 62px Caveat, cursive';
+  x.fillText(author||'Invité',cx,top+92);
+  x.fillStyle='#7a7263'; x.font='400 40px Caveat, cursive';
+  wrapText(x,challenge||'',photo-40).forEach((ln,i)=>x.fillText(ln,cx,top+150+i*46));
+  return new Promise(r=>c.toBlob(b=>r(b),'image/jpeg',.9));
+}
+
+async function downloadAllPhotos(btn){
+  if(typeof JSZip==='undefined'){toast('Module ZIP non chargé');return;}
+  const subs=STATE.submissions.slice();
+  if(!subs.length){toast('Aucune photo à télécharger');return;}
+  const setLabel=txt=>{try{btn.textContent=txt;}catch(_){}};
+  try{
+    btn.disabled=true;
+    const zip=new JSZip();
+    const rootO=zip.folder('Photos originales'), rootP=zip.folder('Photos polaroid');
+    const cws=STATE.challenges.filter(c=>subs.some(s=>s.challengeId===c.id));
+    const total=subs.length; let done=0, failed=0, idx=0;
+    for(const c of cws){
+      idx++;
+      const dir=`${String(idx).padStart(2,'0')} - ${sanitize(c.text)}`;
+      const fO=rootO.folder(dir), fP=rootP.folder(dir);
+      let n=0;
+      for(const s of subs.filter(x=>x.challengeId===c.id)){
+        n++;
+        const author=(STATE.guests.find(g=>g.id===s.guestId)||{}).name||'invite';
+        const base=`${String(n).padStart(2,'0')}_${sanitize(author)}`;
+        try{
+          const blob=await (await fetch(s.photo)).blob();
+          const ext=blob.type==='image/svg+xml'?'svg':blob.type==='image/png'?'png':'jpg';
+          fO.file(`${base}.${ext}`,blob);
+          try{ const pol=await makePolaroid(s.photo,author,c.text); if(pol) fP.file(`${base}_polaroid.jpg`,pol); }catch(_){}
+        }catch(_){failed++;}
+        done++; setLabel(`Préparation… ${done}/${total}`);
+      }
+    }
+    setLabel('Compression…');
+    const out=await zip.generateAsync({type:'blob',compression:'STORE'});
+    const url=URL.createObjectURL(out), a=document.createElement('a');
+    a.href=url; a.download=`photos-mariage-${sanitize(STATE.config.coupleNames)}.zip`;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(()=>URL.revokeObjectURL(url),5000);
+    toast(failed?`Prêt — ${failed} photo(s) non récupérée(s)`:'Téléchargement prêt 📦');
+  }catch(e){console.error(e);toast('Échec de l’export');}
+  finally{try{btn.disabled=false;btn.textContent='📦 Télécharger toutes les photos (.zip)';}catch(_){}}
+}
+
+/* =========================================================================
+   PURGE COMPLÈTE (après le mariage) — double confirmation obligatoire
+   ========================================================================= */
+async function purgeEverything(btn){
+  try{
+    btn.disabled=true; btn.textContent='Suppression en cours…';
+    if(LIVE){
+      /* 1. fichiers du bucket photos */
+      const roots=(await sb.storage.from('photos').list('',{limit:1000})).data||[];
+      for(const r of roots){
+        const inner=(await sb.storage.from('photos').list(r.name,{limit:1000})).data||[];
+        const paths=inner.map(f=>`${r.name}/${f.name}`);
+        if(paths.length) await sb.storage.from('photos').remove(paths);
+        if(!inner.length && r.id) await sb.storage.from('photos').remove([r.name]);
+      }
+      /* 2. données (les votes/photos partent en cascade avec les invités) */
+      await sb.from('votes').delete().neq('id','00000000-0000-0000-0000-000000000000');
+      await sb.from('submissions').delete().neq('id','00000000-0000-0000-0000-000000000000');
+      await sb.from('guests').delete().neq('id','00000000-0000-0000-0000-000000000000');
+      /* 3. remise à zéro du déroulement (les réglages sont conservés) */
+      await sb.from('game_config').update({phase:'photo',bonuses_distributed:false,deadline:null,updated_at:new Date().toISOString()}).eq('id',1);
+      safeDel('wedding_guest'); STATE.currentGuest=null; STATE.view='join';
+      await Promise.all([pull('guests'),pull('submissions'),pull('votes'),pull('game_config')]);
+    }else{
+      STATE.guests=[];STATE.submissions=[];STATE.votes=[];STATE.currentGuest=null;
+      STATE.bonusesDistributed=false;STATE.phase='photo';STATE.config.deadline=null;STATE.view='join';
+    }
+    closeAdmin(); toast('Base vidée — prêt pour un nouveau mariage ✨');
+  }catch(e){ console.error(e); toast('Suppression incomplète — vérifie le tableau de bord'); }
+  finally{ try{btn.disabled=false;btn.textContent='🧹 Vider entièrement la base';}catch(_){} }
+}
+
+/* =========================================================================
    ADMIN
    ========================================================================= */
 function openAdmin(){STATE.adminOpen=true;renderAdmin();}
@@ -741,14 +846,23 @@ function admGroupes(){
    <div class="acard"><h4>Déplacer les participants</h4>${guests}</div>`;
 }
 function admModer(){
-  if(!STATE.submissions.length)return `<div class="acard"><div class="note">Aucune photo postée pour le moment.</div></div>`;
+  const n=STATE.submissions.length;
+  const exportCard=`<div class="acard"><h4>Export des photos</h4>
+     <div class="note" style="margin:0 0 10px">Télécharge toutes les photos dans un .zip, avec pour chaque défi un dossier contenant deux versions : l’originale et une version polaroïd légendée (prénom + défi). Selon le nombre de photos, l’opération peut prendre un moment.</div>
+     <button class="abtn gold" data-act="dlphotos" ${n?'':'disabled'}>📦 Télécharger toutes les photos (.zip)</button>
+     ${n?'':'<div class="note">Aucune photo pour le moment.</div>'}</div>
+   <div class="acard"><h4>Après le mariage</h4>
+     <div class="note" style="margin:0 0 10px">Efface définitivement participants, photos, votes <b>et les fichiers du stockage</b>. Les réglages (mariés, défis, thème, groupes, PIN) sont conservés pour un prochain événement. Fais ton export avant !</div>
+     <button class="abtn danger" data-act="purge">🧹 Vider entièrement la base</button>
+     <div class="note">Double confirmation demandée : validation, puis saisie du mot SUPPRIMER.</div></div>`;
+  if(!n) return exportCard;
   const cards=STATE.submissions.slice().reverse().map(s=>{
     const c=ch(s.challengeId), g=STATE.guests.find(x=>x.id===s.guestId);
     return `<div class="modcard"><img src="${s.photo}"><div class="mi"><div class="a">${esc(g?g.name:'?')}</div>
         <div class="c">${esc(c?c.text:'')}</div><div class="s">${voteCount(s.id)?('★ '+avgStars(s.id).toFixed(1)+' ('+voteCount(s.id)+')'):'pas encore noté'}</div></div>
       <button class="delm" data-act="delsub" data-id="${s.id}">Retirer</button></div>`;
   }).join('');
-  return `<div class="acard"><h4>Photos postées (${STATE.submissions.length})</h4><div class="modgrid">${cards}</div></div>`;
+  return exportCard+`<div class="acard"><h4>Photos postées (${n})</h4><div class="modgrid">${cards}</div></div>`;
 }
 
 /* =========================================================================
@@ -783,6 +897,14 @@ document.addEventListener('click',async e=>{
   if(a==='addch'){ if(LIVE){try{await sb.from('challenges').insert({grp:t.dataset.g,label:'Nouveau défi',points:5});await pull('challenges');rerender();}catch(e){console.error(e);}} else {STATE.challenges.push({id:nid('c'),group:t.dataset.g,text:'Nouveau défi',points:5});renderAdmin();} return; }
   if(a==='delch'){ const id=t.dataset.id; if(LIVE){try{await sb.from('challenges').delete().eq('id',id);await pull('challenges');rerender();}catch(e){console.error(e);}} else {STATE.challenges=STATE.challenges.filter(c=>c.id!==id);renderAdmin();} return; }
   if(a==='delsub'){ const id=t.dataset.id; if(LIVE){try{await sb.from('submissions').delete().eq('id',id);await pull('submissions');await pull('votes');rerender();}catch(e){console.error(e);}} else {STATE.submissions=STATE.submissions.filter(s=>s.id!==id);STATE.votes=STATE.votes.filter(v=>sub(v.submissionId));renderAdmin();} return; }
+  if(a==='dlphotos'){ downloadAllPhotos(t); return; }
+  if(a==='purge'){
+    const n=STATE.submissions.length, g=STATE.guests.length;
+    if(!confirm(`⚠️ SUPPRESSION DÉFINITIVE\n\n${g} participant(s), ${n} photo(s) et tous les votes seront effacés, ainsi que les fichiers photos du stockage.\n\nPense à faire l’export .zip AVANT de continuer.\n\nContinuer ?`)) return;
+    const code=prompt('Confirmation finale.\n\nTape SUPPRIMER (en majuscules) pour vider définitivement la base :');
+    if((code||'').trim()!=='SUPPRIMER'){ toast('Suppression annulée'); return; }
+    purgeEverything(t); return;
+  }
   if(a==='addgroup'){ const L=nextGroupLabel(); const ng=[...STATE.groups,L]; if(LIVE) updateConfig({groups:ng}); else {STATE.groups=ng;renderAdmin();} return; }
   if(a==='delgroup'){
     const g=t.dataset.g;

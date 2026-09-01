@@ -6,7 +6,7 @@
 <title>Défis Photos Mariage</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Fredoka:wght@500;600&family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Dancing+Script:wght@600;700&family=Fredoka:wght@500;600&family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
@@ -87,6 +87,58 @@
     --glow:#fdeede; --border:#ecdcc3;
     --font-head:'Playfair Display',Georgia,serif; --font-hand:'Caveat',cursive;
   }
+
+  /* ===== THÈME : Rétro floral (carte Océane & Mathieu) ===== */
+  [data-theme="retro-floral"]{
+    --bg:#fdf7f2; --surface:#ffffff; --ink:#2f2b28; --muted:#8d8378;
+    --accent:#f4761f; --accent-d:#d85f0c; --accent-soft:#ffe9d4;
+    --gold:#f5b825; --green:#4a9a4b;
+    --line:#f2e6da; --margin:#f4761f; --hand-ink:#f4761f;
+    --header-bg:rgba(253,247,242,.93); --nav-bg:rgba(255,255,255,.96);
+    --glow:#fffaf3; --border:#f0e0cf;
+    --font-head:'Poppins',system-ui,sans-serif; --font-hand:'Dancing Script',cursive;
+  }
+  /* fond fleuri rétro (pétales orange / jaune / vert) */
+  [data-theme="retro-floral"] body:before{
+    content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+    background:
+      radial-gradient(ellipse 130px 70px at 2% 8%,#f4761f,transparent 60%),
+      radial-gradient(ellipse 70px 130px at 9% 3%,#f4761f,transparent 60%),
+      radial-gradient(ellipse 120px 62px at 98% 12%,#fbc02d,transparent 60%),
+      radial-gradient(ellipse 62px 120px at 93% 5%,#fbc02d,transparent 60%),
+      radial-gradient(ellipse 110px 58px at 1% 62%,#fbc02d,transparent 60%),
+      radial-gradient(ellipse 96px 52px at 99% 55%,#4a9a4b,transparent 60%),
+      radial-gradient(ellipse 120px 64px at 4% 96%,#4a9a4b,transparent 60%),
+      radial-gradient(ellipse 130px 68px at 97% 94%,#f4761f,transparent 60%),
+      radial-gradient(circle at 50% 30%,#f7ded9,transparent 55%),
+      #fdf7f2;
+    opacity:.85;
+  }
+  [data-theme="retro-floral"] .join{background:transparent}
+  [data-theme="retro-floral"] .join .names{font-family:'Dancing Script',cursive;color:#f4761f;font-size:54px;font-weight:700}
+  [data-theme="retro-floral"] .join h1{color:var(--green);letter-spacing:4px}
+  [data-theme="retro-floral"] .join .deco{color:#f4761f}
+  [data-theme="retro-floral"] .join .sub{color:#6b6259;font-style:normal}
+  [data-theme="retro-floral"] .join .field{background:#fff;padding:22px 18px;border-radius:6px;max-width:340px;
+    box-shadow:0 10px 30px rgba(120,80,40,.16)}
+  [data-theme="retro-floral"] .hnames{font-family:'Dancing Script',cursive;color:#f4761f;font-size:26px;font-weight:700}
+  [data-theme="retro-floral"] .notebook{border-radius:6px;box-shadow:0 12px 34px rgba(120,80,40,.18);
+    background-image:repeating-linear-gradient(transparent,transparent 37px,#f4ece2 37px,#f4ece2 38px)}
+  [data-theme="retro-floral"] .nb-title{color:var(--green);font-family:'Poppins',sans-serif;font-weight:600;font-size:29px}
+  [data-theme="retro-floral"] .nb-sub{font-family:'Dancing Script',cursive;color:#f5a623;font-size:26px;font-weight:700}
+  [data-theme="retro-floral"] .task .txt{font-family:'Dancing Script',cursive;font-size:25px;font-weight:600}
+  [data-theme="retro-floral"] .nb-hint{font-family:'Dancing Script',cursive;font-size:21px;font-weight:600;color:#b09a84}
+  [data-theme="retro-floral"] .check{border-color:#f2c39a}
+  [data-theme="retro-floral"] .cta,[data-theme="retro-floral"] .bigbtn.cam{background:#f4761f;box-shadow:0 7px 18px rgba(244,118,31,.4)}
+  [data-theme="retro-floral"] .hscore{background:var(--green)}
+  [data-theme="retro-floral"] .htimer{background:#fff3dc;color:#d85f0c}
+  [data-theme="retro-floral"] .p2{background:#4a9a4b}.p5{background:#6f9ec4}
+  [data-theme="retro-floral"] .p5{background:#f5b825}
+  [data-theme="retro-floral"] .p7{background:#f4761f}
+  [data-theme="retro-floral"] .p10{background:#d85f0c}
+  [data-theme="retro-floral"] .phasebanner{background:#fff3dc;color:#a86a1e;border:1px solid #f6dcae}
+  [data-theme="retro-floral"] .sectitle{color:var(--green)}
+  [data-theme="retro-floral"] .card .clabel b{color:#ffd08a}
 
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
   html,body{height:100%}
@@ -338,6 +390,7 @@ const THEMES=[
   {id:'champetre',      name:'Champêtre',           dots:['#7d8b5a','#c69a4e','#6b5a3a','#f3ecde']},
   {id:'sobre',          name:'Sobre & épuré',       dots:['#3d4756','#8a9099','#6b8f7d','#f7f7f6']},
   {id:'alsace-espagne', name:'Alsace × Espagne',    dots:['#c0392b','#e0a526','#2e6b8f','#5d7c4f']},
+  {id:'retro-floral',   name:'Rétro floral',        dots:['#f4761f','#fbc02d','#4a9a4b','#f7ded9']},
 ];
 function applyTheme(){ document.documentElement.setAttribute('data-theme', STATE.config.theme||'classic'); }
 

@@ -198,6 +198,8 @@
   .polaroid:after{content:"";position:absolute;top:-9px;left:42px;width:54px;height:18px;background:rgba(214,228,238,.7);
     transform:rotate(-4deg);box-shadow:0 1px 2px rgba(0,0,0,.06)}
   .nb-hint{font-family:var(--font-hand);font-size:18px;color:var(--muted);margin-top:22px;text-align:center;line-height:1.3}
+  .retake{margin:-4px 0 12px 38px}
+  .retake button{font-size:12px;color:var(--accent-d);background:var(--accent-soft);padding:6px 12px;border-radius:20px;font-family:var(--font-head)}
 
   /* ---------- VOTE (Tinder) ---------- */
   .voteWrap{display:flex;flex-direction:column;align-items:center}
@@ -457,7 +459,10 @@ async function pull(tbl){
 }
 function ingest(tbl,rows){
   if(tbl==='challenges')      STATE.challenges = rows.map(r=>({id:r.id,group:r.grp,text:r.label,points:r.points}));
-  else if(tbl==='guests')     STATE.guests     = rows.map(r=>({id:r.id,name:r.name,group:r.grp,assigned:r.assigned||[]}));
+  else if(tbl==='guests'){
+    STATE.guests = rows.map(r=>({id:r.id,name:r.name,group:r.grp,assigned:r.assigned||[],retakes:r.retakes||[]}));
+    if(STATE.currentGuest){ const me=STATE.guests.find(x=>x.id===STATE.currentGuest.id); if(me) STATE.currentGuest=me; }
+  }
   else if(tbl==='submissions')STATE.submissions= rows.map(r=>({id:r.id,guestId:r.guest_id,challengeId:r.challenge_id,group:r.grp,photo:r.photo_url,t:r.created_at}));
   else if(tbl==='votes')      STATE.votes      = rows.map(r=>({id:r.id,voterId:r.voter_id,submissionId:r.submission_id,stars:r.stars}));
   else if(tbl==='game_config'){
@@ -577,6 +582,34 @@ async function castVote(subId,stars){
   else { STATE.votes.push({id:nid('v'),voterId:STATE.currentGuest.id,submissionId:subId,stars}); }
 }
 
+/* ---- retrait d'une photo par le joueur : une seule fois par défi ---- */
+function canRetake(cid){
+  const me=STATE.currentGuest; if(!me) return false;
+  const canPhoto = STATE.phase==='photo' || (STATE.phase==='vote' && STATE.config.photosDuringVote);
+  if(!canPhoto) return false;
+  if(!guestSubs(me.id).some(s=>s.challengeId===cid)) return false;
+  return !(me.retakes||[]).includes(cid);
+}
+async function retakePhoto(cid){
+  const me=STATE.currentGuest; if(!canRetake(cid)) return;
+  const s=guestSubs(me.id).find(x=>x.challengeId===cid); if(!s) return;
+  if(!confirm('Retirer cette photo ?\n\nTu pourras en publier une nouvelle, mais ce sera définitif : ce retrait n’est possible qu’une seule fois par défi.')) return;
+  const newRetakes=[...(me.retakes||[]),cid];
+  if(LIVE){
+    try{
+      await sb.from('submissions').delete().eq('id',s.id);
+      try{ const p=(s.photo||'').split('/photos/')[1]; if(p) await sb.storage.from('photos').remove([decodeURIComponent(p)]); }catch(_){}
+      await sb.from('guests').update({retakes:newRetakes}).eq('id',me.id);
+      await Promise.all([pull('submissions'),pull('votes'),pull('guests')]);
+      render(); toast('Photo retirée — à toi de rejouer 📷');
+    }catch(e){ console.error(e); toast('Retrait impossible 😕'); }
+  }else{
+    STATE.submissions=STATE.submissions.filter(x=>x.id!==s.id);
+    STATE.votes=STATE.votes.filter(v=>v.submissionId!==s.id);
+    me.retakes=newRetakes; render(); toast('Photo retirée — à toi de rejouer 📷');
+  }
+}
+
 /* =========================================================================
    RENDU
    ========================================================================= */
@@ -626,7 +659,7 @@ function carnetHTML(){
     const cls='task'+(done?' done':'')+(locked&&!done?' locked':'');
     return `<div class="${cls}"><div class="check">${done?'✓':''}</div>
       <div class="txt" ${(!done&&!locked)?`data-act="open" data-cid="${cid}"`:''}>${esc(c.text)}</div>
-      <span class="pts p${c.points}">${c.points}</span></div>${done?`<div class="polaroid"><img src="${done.photo}"></div>`:''}`;
+      <span class="pts p${c.points}">${c.points}</span></div>${done?`<div class="polaroid"><img src="${done.photo}"></div>${canRetake(cid)?`<div class="retake"><button data-act="retake" data-cid="${cid}">↺ Retirer cette photo (une seule fois)</button></div>`:''}`:''}`;
   }).join('') || `<div class="nb-hint">Tes défis arrivent…</div>`;
   const hint = locked
     ? `<div class="nb-hint">Les photos sont closes ✦<br>Direction l’onglet 🏆 pour le classement</div>`
@@ -1067,13 +1100,31 @@ function admModer(){
      <button class="abtn danger" data-act="purge">🧹 Vider entièrement la base</button>
      <div class="note">Double confirmation demandée : validation, puis saisie du mot SUPPRIMER.</div></div>`;
   if(!n) return exportCard;
-  const cards=STATE.submissions.slice().reverse().map(s=>{
+  const q=(STATE.modQuery||'').toLowerCase().trim(), sort=STATE.modSort||'recent';
+  const nameOf=s=>{const g=STATE.guests.find(x=>x.id===s.guestId);return g?g.name:'';};
+  const chOf=s=>{const c=ch(s.challengeId);return c?c.text:'';};
+  let list=STATE.submissions.filter(s=>!q||nameOf(s).toLowerCase().includes(q)||chOf(s).toLowerCase().includes(q));
+  if(sort==='name') list.sort((a,b)=>nameOf(a).localeCompare(nameOf(b))||chOf(a).localeCompare(chOf(b)));
+  else if(sort==='challenge') list.sort((a,b)=>chOf(a).localeCompare(chOf(b))||nameOf(a).localeCompare(nameOf(b)));
+  else if(sort==='stars') list.sort((a,b)=>avgStars(b.id)-avgStars(a.id)||voteCount(b.id)-voteCount(a.id));
+  else list=list.slice().reverse();
+  const filters=`<div class="acard"><h4>Rechercher & trier</h4>
+     <div class="afield" style="margin-bottom:10px"><input id="modq" placeholder="Rechercher un joueur ou un défi…" value="${esc(STATE.modQuery||'')}"></div>
+     <div class="afield" style="margin:0"><label>Trier par</label><select id="modsort">
+       <option value="recent" ${sort==='recent'?'selected':''}>Plus récentes</option>
+       <option value="name" ${sort==='name'?'selected':''}>Nom du joueur (A→Z)</option>
+       <option value="challenge" ${sort==='challenge'?'selected':''}>Défi (A→Z)</option>
+       <option value="stars" ${sort==='stars'?'selected':''}>Meilleures notes</option>
+     </select></div>
+     <div class="note">${list.length} photo${list.length>1?'s':''} affichée${list.length>1?'s':''} sur ${n}.</div></div>`;
+  if(!list.length) return exportCard+filters+`<div class="acard"><div class="note">Aucun résultat pour cette recherche.</div></div>`;
+  const cards=list.map(s=>{
     const c=ch(s.challengeId), g=STATE.guests.find(x=>x.id===s.guestId);
     return `<div class="modcard"><img src="${s.photo}"><div class="mi"><div class="a">${esc(g?g.name:'?')}</div>
-        <div class="c">${esc(c?c.text:'')}</div><div class="s">${voteCount(s.id)?('★ '+avgStars(s.id).toFixed(1)+' ('+voteCount(s.id)+')'):'pas encore noté'}</div></div>
+        <div class="c">${esc(c?c.text:'—')}</div><div class="s">${voteCount(s.id)?('★ '+avgStars(s.id).toFixed(1)+' ('+voteCount(s.id)+')'):'pas encore noté'}</div></div>
       <button class="delm" data-act="delsub" data-id="${s.id}">Retirer</button></div>`;
   }).join('');
-  return exportCard+`<div class="acard"><h4>Photos postées (${n})</h4><div class="modgrid">${cards}</div></div>`;
+  return exportCard+filters+`<div class="acard"><h4>Photos postées (${n})</h4><div class="modgrid">${cards}</div></div>`;
 }
 
 /* =========================================================================
@@ -1085,6 +1136,7 @@ document.addEventListener('click',async e=>{
   if(a==='join'){const i=document.getElementById('gname');const v=(i?.value||'').trim();if(!v){i.focus();return;}joinGame(v);return;}
   if(a==='tab'){STATE.tab=t.dataset.tab;render();return;}
   if(a==='open'){openBubble(t.dataset.cid);return;}
+  if(a==='retake'){retakePhoto(t.dataset.cid);return;}
   if(a==='closeov'){closeOverlays();return;}
   if(a==='secret'){STATE.secretTaps++;clearTimeout(STATE.secretTimer);STATE.secretTimer=setTimeout(()=>STATE.secretTaps=0,1500);if(STATE.secretTaps>=5){STATE.secretTaps=0;openPin();}return;}
   if(a==='pinok'){const v=(document.getElementById('pinin')?.value||'');if(v===STATE.config.pin){closeOverlays();openAdmin();}else{const er=document.getElementById('pinerr');if(er)er.textContent='Code incorrect';}return;}
@@ -1148,6 +1200,7 @@ document.addEventListener('change',async e=>{
     }
     return;
   }
+  if(t.id==='modsort'){ STATE.modSort=t.value; renderAdmin(); return; }
   if(t.id==='endtime'){
     const v=t.value; let ms=null;
     if(v){const [h,m]=v.split(':').map(Number);const d=new Date();d.setHours(h||0,m||0,0,0);ms=d.getTime();}
@@ -1174,6 +1227,10 @@ document.addEventListener('change',async e=>{
 document.addEventListener('input',e=>{
   const t=e.target;
   if(t.dataset.field){STATE.config[t.dataset.field]=t.value;}
+  else if(t.id==='modq'){
+    STATE.modQuery=t.value; const pos=t.selectionStart; renderAdmin();
+    const f=document.getElementById('modq'); if(f){f.focus();try{f.setSelectionRange(pos,pos);}catch(_){}}
+  }
   else if(t.dataset.relabel){STATE.recover[t.dataset.relabel]=t.value;saveRelabel();}
   else if(t.dataset.bidx){STATE.config.bonus[+t.dataset.bidx]=Math.max(0,parseInt(t.value)||0);}
   else if(t.dataset.cfield==='text'){const c=ch(t.dataset.id);if(c)c.text=t.value;}
